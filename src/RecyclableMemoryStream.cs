@@ -68,12 +68,6 @@ namespace Microsoft.IO
         /// </summary>
         private readonly List<byte[]> blocks = new List<byte[]>(1);
 
-        /// <summary>
-        /// This buffer exists so that WriteByte can forward all of its calls to Write
-        /// without creating a new byte[] buffer on every call.
-        /// </summary>
-        private readonly byte[] byteBuffer = new byte[1];
-
         private readonly Guid id;
 
         private readonly RecyclableMemoryStreamManager memoryManager;
@@ -627,8 +621,32 @@ namespace Microsoft.IO
         public override void WriteByte(byte value)
         {
             this.CheckDisposed();
-            this.byteBuffer[0] = value;
-            this.Write(this.byteBuffer, 0, 1);
+            int end = this.position + 1;
+            // Check for overflow
+            if (end > MaxStreamLength)
+            {
+                throw new IOException("Maximum capacity exceeded");
+            }
+
+            this.EnsureCapacity(end);
+
+            if (this.largeBuffer is null)
+            {
+                int blockSize = this.memoryManager.BlockSize;
+                int block = this.position / blockSize;
+                int offset = this.position - block * blockSize;
+
+                byte[] currentBlock = this.blocks[block];
+
+                currentBlock[offset] = value;
+            }
+            else
+            {
+                this.largeBuffer[this.position] = value;
+            }
+
+            this.position = end;
+            this.length = Math.Max(this.position, this.length);
         }
 
         /// <summary>
